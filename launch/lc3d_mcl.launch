@@ -3,10 +3,11 @@
 
   <include file="$(find ydlidar)/launch/lidar.launch" />
   <include file="$(find razor_imu_9dof)/launch/razor-pub.launch" />
+  <include file="$(find px4flow)/launch/px4flow.launch" />
 
-  <node name="map_server" pkg="map_server" type="map_server" args="$(find imu_bridge)/map/map_2.yaml" />
+  <node name="map_server" pkg="map_server" type="map_server" args="$(find lc3d_mcl)/map/map_2.yaml" />
   <!--<node pkg="tf" type="static_transform_publisher" name="world_map_static_broadcaster" args="0 0 0 0 0 0 1 world /map 100" /-->
 
-  <node name="imu_wrapper" pkg="imu_bridge" type="imu_bidge_wrapper.py" respawn="false" output="screen" />
+  <node name="imu_wrapper" pkg="lc3d_mcl" type="imu_bidge_wrapper.py" respawn="false" output="screen" />
 
 </launch>

@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import numpy as np
-import quaternion
 from tf.transformations import euler_from_quaternion
 from sklearn.neighbors import NearestNeighbors as KNN
 
@@ -35,11 +34,10 @@ def scan2cart (Z):
 
 class ParticleFilter(object):
 
-    def __init__(self, R_w, R_a, Q_x, Q_v, Q_q, Map, H, Np = 100):
+    def __init__(self, R_w, Q_x, Q_v, Q_q, Map, H, Np = 100):
         self.H = H
         self.Map = Map
         self.R_w = R_w
-        self.R_a = R_a
         self.Q_x = Q_x
         self.Q_v = Q_v
         self.Q_q = Q_q
@@ -52,16 +50,13 @@ class ParticleFilter(object):
         print "initialized!"
         self.nbrs = KNN(n_neighbors=1, algorithm='ball_tree').fit(self.Map)
 
-    def predict (self, w, a, dt):
-        omega = []
+    def predict (self, w, v, dt):
         for ii in range (self.Np):
-            wt = w + np.random.multivariate_normal(np.array([0,0,0]), self.R_w)
-            self.Q[ii] = (0.5 * angvel2mat(wt) * dt +np.eye(4)).dot(self.Q[ii])+ np.random.multivariate_normal(np.array([0,0,0,0]), self.Q_q)
+            wt = w + np.random.multivariate_normal(np.array([0,0,0]), dt*self.R_w)
+            self.Q[ii] = (0.5 * angvel2mat(wt) * dt +np.eye(4)).dot(self.Q[ii])+ np.random.multivariate_normal(np.array([0,0,0,0]), dt*self.Q_q)
             self.euler[ii] = euler_from_quaternion([self.Q[ii][0],self.Q[ii][1],self.Q[ii][2],self.Q[ii][3]])
-            at=  np.random.multivariate_normal(np.array([0,0,0]), self.R_a)
-            at = euler2rot_matrix(self.euler[ii]).dot(at) 
-            self.V[ii] = self.V[ii] + at * dt + np.random.multivariate_normal(np.array([0,0,0]), self.Q_v)
-            self.X[ii] = self.X[ii] + self.V[ii] * dt + np.random.multivariate_normal(np.array([0,0,0]), self.Q_x)
+            vi = v + np.random.multivariate_normal(np.array([0,0,0]), dt*self.Q_v)
+            self.X[ii] = self.X[ii] + vi * dt + np.random.multivariate_normal(np.array([0,0,0]), dt*self.Q_x)
             
     def update (self, Z):
         Z = scan2cart(Z)
@@ -81,5 +76,4 @@ class ParticleFilter(object):
         index = np.random.choice(a = self.Np,size = self.Np,p = self.W)
         self.W = np.ones (self.Np) / self.Np
         self.Q = self.Q[index]
-        self.V = self.V[index]
         self.X = self.X[index]

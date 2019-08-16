@@ -5,23 +5,35 @@ import numpy as np
 from sensor_msgs.msg import Imu, LaserScan, PointCloud
 from geometry_msgs.msg import PoseArray, Pose, PoseWithCovarianceStamped, Quaternion, Point
 from nav_msgs.srv import GetMap
-from particle_filter_v2 import ParticleFilter
+from particle_filter import ParticleFilter
+from px_comm.msg import OpticalFlow
 from tf import TransformBroadcaster
-import quaternion
 
 rospy.init_node('imu_bridge_wrapper', anonymous = True)
 last_time = rospy.Time.now().to_sec()
 first_run = True
+Vxy = []
+W = []
 
 def imu_callback(msg):
-    global last_time, partical_filter, first_run, a_ref
+    global last_time, partical_filter, first_run, a_ref, W, Vxy
     if first_run is False:
         imu = msg
         time = imu.header.stamp.secs + imu.header.stamp.nsecs * 10e-9
         dt = time - last_time
         last_time = time
-        Q = [imu.orientation.x , imu.orientation.y, imu.orientation.z,imu.orientation.w]
-        partical_filter.predict (Q,dt)
+        W = [imu.angular_velocity.x , imu.angular_velocity.y, imu.angular_velocity.z]
+        partical_filter.predict (W,Vxy,dt)
+        
+def pixelflow_callback(msg):
+    global last_time, partical_filter, first_run, a_ref, W, Vxy
+    if first_run is False:
+        pixflow = msg
+        time = pixflow.header.stamp.secs + pixflow.header.stamp.nsecs * 10e-9
+        dt = time - last_time
+        last_time = time
+        Vxy = [pixflow.velocity_x , pixflow.velocity_y, 0.0]
+        partical_filter.predict (W,Vxy,dt)
 
 def scan_callback(msg):
     global partical_filter, first_run
@@ -116,7 +128,7 @@ def main():
     map_info = static_map().map.info
     #occupancy_grid = imu_bidge_wrapper.occupancy_grid()
     objects_map  = obs()
-
+    rospy.Subscriber('/px4flow/opt_flow', OpticalFlow, pixelflow_callback,queue_size = 1)
     rospy.Subscriber('imu', Imu, imu_callback,queue_size = 1)
     REF = imu_first = rospy.wait_for_message('imu', Imu)
     rospy.Subscriber('scan', LaserScan, scan_callback, queue_size = 1)
@@ -131,11 +143,11 @@ def main():
     R_w = R_w[0] * np.eye(3)
     R_a = imu_first.linear_acceleration_covariance
     R_a = R_a[0] * np.eye(3)
-    Q_x = 0.001 * np.eye(3)
-    Q_v = R_a
+    Q_x = np.diag([0.1,0.1,0.5])
+    Q_v = np.diag([0.1,0.1,0.5])
     Q_q = 0.01 * np.eye(4)
     X0 = np.array([0.0,0.0,0.8])
-    partical_filter = ParticleFilter( Q_x,  Q_q, objects_map, H = 4, X0= X0,  Np=100)
+    partical_filter = ParticleFilter(R_w, Q_x,  Q_q, objects_map, H = 4, X0= X0,  Np=100)
     first_run = False
     rate = rospy.Rate(5)
     while not rospy.is_shutdown():
