@@ -10,30 +10,33 @@ from px_comm.msg import OpticalFlow
 from tf import TransformBroadcaster
 
 rospy.init_node('imu_bridge_wrapper', anonymous = True)
-last_time = rospy.Time.now().to_sec()
+last_time_imu = rospy.Time.now().to_sec()
+last_time_px4flow = rospy.Time.now().to_sec()
+
 first_run = True
 Vxy = []
 W = []
 
 def imu_callback(msg):
-    global last_time, partical_filter, first_run, a_ref, W, Vxy
+    global last_time_imu, partical_filter, first_run, a_ref, W, Vxy
     if first_run is False:
         imu = msg
         time = imu.header.stamp.secs + imu.header.stamp.nsecs * 10e-9
-        dt = time - last_time
-        last_time = time
+        dt = time - last_time_imu
+        last_time_imu = time
         W = [imu.angular_velocity.x , imu.angular_velocity.y, imu.angular_velocity.z]
-        partical_filter.predict (W,Vxy,dt)
+        partical_filter.predict (W,np.array([0,0,0]),dt)
         
 def pixelflow_callback(msg):
-    global last_time, partical_filter, first_run, a_ref, W, Vxy
+    global last_time_px4flow, partical_filter, first_run, a_ref, W, Vxy
     if first_run is False:
         pixflow = msg
         time = pixflow.header.stamp.secs + pixflow.header.stamp.nsecs * 10e-9
-        dt = time - last_time
-        last_time = time
-        Vxy = [pixflow.velocity_x , pixflow.velocity_y, 0.0]
-        partical_filter.predict (W,Vxy,dt)
+        dt = time - last_time_px4flow
+        last_time_px4flow = time
+        Vxy = np.array([pixflow.velocity_x , pixflow.velocity_y, 0.0])
+        print "recived pixel flow data: "+str(Vxy)
+        partical_filter.predict ([0,0,0],Vxy,dt)
 
 def scan_callback(msg):
     global partical_filter, first_run
@@ -50,7 +53,7 @@ def convert_scan(scan):
     theta = np.add(scan.angle_min, np.multiply(i, scan.angle_increment)) + theta_reset
     theta = np.delete(theta,np.where(~np.isfinite(r)),axis=0)
     r = np.delete(r,np.where(~np.isfinite(r)),axis=0)
-    return np.vstack((r,np.flip(theta))).T
+    return np.vstack((r,np.flip(theta,-1))).T
 
 def occupancy_grid():
     static_map = rospy.ServiceProxy('static_map',GetMap)
@@ -128,7 +131,7 @@ def main():
     map_info = static_map().map.info
     #occupancy_grid = imu_bidge_wrapper.occupancy_grid()
     objects_map  = obs()
-    rospy.Subscriber('/px4flow/opt_flow', OpticalFlow, pixelflow_callback,queue_size = 1)
+    rospy.Subscriber('px4flow/opt_flow', OpticalFlow, pixelflow_callback,queue_size = 1)
     rospy.Subscriber('imu', Imu, imu_callback,queue_size = 1)
     REF = imu_first = rospy.wait_for_message('imu', Imu)
     rospy.Subscriber('scan', LaserScan, scan_callback, queue_size = 1)
@@ -139,15 +142,12 @@ def main():
 
     a_ref = [REF.linear_acceleration.x , REF.linear_acceleration.y, REF.linear_acceleration.z]
 
-    R_w = imu_first.angular_velocity_covariance
-    R_w = R_w[0] * np.eye(3)
-    R_a = imu_first.linear_acceleration_covariance
-    R_a = R_a[0] * np.eye(3)
-    Q_x = np.diag([0.1,0.1,0.5])
-    Q_v = np.diag([0.1,0.1,0.5])
+    R_w = np.diag([0.01,0.01,0.01])
+    Q_x = np.diag([0.01,0.01,0.05])
+    Q_v = np.diag([0.01,0.01,0.05])
     Q_q = 0.01 * np.eye(4)
     X0 = np.array([0.0,0.0,0.8])
-    partical_filter = ParticleFilter(R_w, Q_x,  Q_q, objects_map, H = 4, X0= X0,  Np=100)
+    partical_filter = ParticleFilter(R_w, Q_x, Q_v,  Q_q, objects_map, H = 4, X0= X0,  Np=50)
     first_run = False
     rate = rospy.Rate(5)
     while not rospy.is_shutdown():

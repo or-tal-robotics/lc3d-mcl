@@ -34,7 +34,7 @@ def scan2cart (Z):
 
 class ParticleFilter(object):
 
-    def __init__(self, R_w, Q_x, Q_v, Q_q, Map, H, Np = 100):
+    def __init__(self, R_w, Q_x, Q_v, Q_q, Map, H, X0, Np = 100):
         self.H = H
         self.Map = Map
         self.R_w = R_w
@@ -43,7 +43,7 @@ class ParticleFilter(object):
         self.Q_q = Q_q
         self.Np = Np
         self.W = np.ones(Np)/Np
-        self.X = np.zeros((Np,3))
+        self.X = np.zeros((Np,3)) + X0
         self.V = np.zeros((Np,3))
         self.Q = np.zeros((Np,4))
         self.euler = np.zeros((Np,3))
@@ -51,18 +51,31 @@ class ParticleFilter(object):
         self.nbrs = KNN(n_neighbors=1, algorithm='ball_tree').fit(self.Map)
 
     def predict (self, w, v, dt):
+        if dt < 0.0001:
+            print "dt is too small! :"+str(dt)
+            dt = 0.01
         for ii in range (self.Np):
             wt = w + np.random.multivariate_normal(np.array([0,0,0]), dt*self.R_w)
             self.Q[ii] = (0.5 * angvel2mat(wt) * dt +np.eye(4)).dot(self.Q[ii])+ np.random.multivariate_normal(np.array([0,0,0,0]), dt*self.Q_q)
             self.euler[ii] = euler_from_quaternion([self.Q[ii][0],self.Q[ii][1],self.Q[ii][2],self.Q[ii][3]])
             vi = v + np.random.multivariate_normal(np.array([0,0,0]), dt*self.Q_v)
+            vi = self.euler[ii].dot(vi)
             self.X[ii] = self.X[ii] + vi * dt + np.random.multivariate_normal(np.array([0,0,0]), dt*self.Q_x)
+            
+    def relative_observation(self,Z):
+        Z = scan2cart(Z)
+        mean_Q = np.mean(self.Q, axis = 0)
+        maen_euler = euler_from_quaternion([mean_Q[0],mean_Q[1],mean_Q[2],mean_Q[3]])
+        Z_temp = euler2rot_matrix(maen_euler).dot(Z.T) 
+        Z_temp = Z_temp.T + np.mean(self.X,axis = 0)
+        return Z_temp
             
     def update (self, Z):
         Z = scan2cart(Z)
         for ii in range(self.Np):
             Z_temp =  euler2rot_matrix(self.euler[ii]).dot(Z.T) 
             Z_temp = Z_temp.T
+            print Z_temp[:,0:2]
             _, indices = self.nbrs.kneighbors(Z_temp[:,0:2])
             Z_star = self.Map[indices].reshape(Z_temp[:,0:2].shape)
             L1 = np.exp(-(1.1)* np.linalg.norm(Z_star-Z_temp[:,0:2],axis=1)**2)
